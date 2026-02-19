@@ -1,0 +1,70 @@
+services:
+  video-detector-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: video-detector-cpu
+    volumes:
+      - ./input:/data/input
+      - ./output:/data/output
+      - ./logs:/data/logs
+      - ./trained_models:/data/models
+    environment:
+      - WATCH_FOLDER=/data/input
+      - OUTPUT_FOLDER=/data/output
+      - MODELS_FOLDER=/data/models
+      - LOG_FILE=/data/logs/app.log
+      - FORCE_CPU=true
+      - FRAME_FAKE_THRESHOLD=0.5
+      - VIDEO_FAKE_THRESHOLD=0.4
+    restart: unless-stopped
+
+  video-detector-cuda:
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+    container_name: video-detector-cuda
+    volumes:
+      - ./input:/data/input
+      - ./output:/data/output
+      - ./logs:/data/logs
+      - ./trained_models:/data/models
+    environment:
+      - WATCH_FOLDER=/data/input
+      - OUTPUT_FOLDER=/data/output
+      - MODELS_FOLDER=/data/models
+      - LOG_FILE=/data/logs/app.log
+      - NVIDIA_VISIBLE_DEVICES=all
+      - FRAME_FAKE_THRESHOLD=0.5
+      - VIDEO_FAKE_THRESHOLD=0.4
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - cuda
+
+  video-detector-mps:
+    build:
+      context: .
+      dockerfile: Dockerfile.mps
+    container_name: video-detector-mps
+    volumes:
+      - ./input:/data/input
+      - ./output:/data/output
+      - ./logs:/data/logs
+      - ./trained_models:/data/models
+    environment:
+      - WATCH_FOLDER=/data/input
+      - OUTPUT_FOLDER=/data/output
+      - MODELS_FOLDER=/data/models
+      - LOG_FILE=/data/logs/app.log
+      - FRAME_FAKE_THRESHOLD=0.5
+      - VIDEO_FAKE_THRESHOLD=0.4
+    restart: unless-stopped
+    profiles:
+      - mps
