@@ -1,96 +1,141 @@
 # Docker Video API (RGB Models)
 
-This repository is a video-focused baseline module modeled after `docker-api`.
+Video deepfake detection module based on the `docker-api` baseline, adapted for **video-in / video-out**.
 
-It watches an input folder, processes new videos, and writes:
-- an annotated output video (`*_processed.mp4`)
-- a text report (`*_report.txt`)
+It watches an input folder, processes incoming videos, and writes:
+- annotated output video (`*_processed.mp4`)
+- report file (`*_report.txt`)
 
-Only **RGB models** are used. Wavelet/frequency models are not part of this module.
+Only **RGB models** are used (no wavelet/frequency models).
 
-## Detection logic
+## What the pipeline does
 
-- The pipeline detects faces per frame and processes **only the biggest detected face**.
-- On CUDA/MPS profiles, RetinaFace is used (with dlib fallback if unavailable).
-- If at least one enabled model predicts fake above threshold (default `0.5`), the frame is marked fake.
-- Fake frames are drawn with a red box and label `FAKE`.
-- Real frames are drawn with a green box and label `REAL`.
-- Final percentages are computed over **frames with at least one detected face**.
+- Detects faces per frame and processes **only the largest detected face**.
+- Marks frame as `FAKE` if **any enabled model** predicts fake above threshold.
+- Draws red bbox for fake, green bbox for real.
+- Computes percentages over **face frames only**:
+  - `fake_face_frames / face_frames`
+- Video verdict:
+  - `VIDEO_FAKE_NOT_FALSE_POSITIVE` if fake ratio >= `VIDEO_FAKE_THRESHOLD` (default `0.40`)
+  - otherwise `MOSTLY_REAL`
 
-Video-level rule:
-- If `fake_face_frames / face_frames >= 0.40`, verdict is `VIDEO_FAKE_NOT_FALSE_POSITIVE`.
-- Otherwise verdict is `MOSTLY_REAL`.
+## Get model weights
 
-## Directory structure
+Model files are **not** committed in this repository.
 
-```text
-docker-video-api/
-├── app.py
-├── video_processor.py
-├── models/
-├── trained_models/
-├── Dockerfile
-├── Dockerfile.cuda
-├── Dockerfile.mps
-├── docker-compose.yml
-└── requirements.txt
+Download them from:
+- https://drive.google.com/drive/folders/1AB1vPWF9dEv4l-aeKp8tbjXHumzJ0bLO?usp=sharing
+
+Place all `.pt`/`.pth` files into:
+- `./trained_models` (mounted in container as `/data/models`)
+
+## Prebuilt container images (GHCR)
+
+Images are published by GitHub Actions on pushes to `main`.
+
+Registry path:
+- `ghcr.io/dvrkoo/docker-video-api/video-deepfake-detector`
+
+Main tags:
+- CPU: `latest`
+- CUDA: `latest-cuda`
+- Apple Silicon profile image: `latest-mps`
+
+Example pulls:
+
+```bash
+docker pull ghcr.io/dvrkoo/docker-video-api/video-deepfake-detector:latest
+docker pull ghcr.io/dvrkoo/docker-video-api/video-deepfake-detector:latest-cuda
+docker pull ghcr.io/dvrkoo/docker-video-api/video-deepfake-detector:latest-mps
 ```
 
-## Build and run
+## Run with docker-compose
 
-Create directories:
+Create folders:
 
 ```bash
 mkdir -p input output logs trained_models
 ```
 
-CPU:
+### CPU
 
 ```bash
-docker-compose up video-detector-cpu
+docker compose up video-detector-cpu
 ```
 
-CUDA:
+### CUDA (NVIDIA)
 
 ```bash
-docker-compose --profile cuda up video-detector-cuda
+docker compose --profile cuda up video-detector-cuda
 ```
 
-MPS profile for Apple Silicon Docker (linux/arm64 image, CPU execution inside container):
+### MPS profile (Apple Silicon Docker)
 
 ```bash
-docker-compose --profile mps up video-detector-mps
+docker compose --profile mps up video-detector-mps
 ```
 
-For faster rebuilds on local machines, enable BuildKit:
+Notes:
+- `video-detector-mps` is built as `linux/arm64` for M1/M2/M3 machines.
+- Inside Docker on macOS, runtime may still use CPU depending on backend/provider availability.
+
+## Run prebuilt image directly
+
+### CPU
 
 ```bash
-DOCKER_BUILDKIT=1 docker compose build
+docker run -d \
+  --name video-detector-cpu \
+  -v $(pwd)/input:/data/input \
+  -v $(pwd)/output:/data/output \
+  -v $(pwd)/logs:/data/logs \
+  -v $(pwd)/trained_models:/data/models \
+  -e WATCH_FOLDER=/data/input \
+  -e OUTPUT_FOLDER=/data/output \
+  -e MODELS_FOLDER=/data/models \
+  -e FORCE_CPU=true \
+  ghcr.io/dvrkoo/docker-video-api/video-deepfake-detector:latest
 ```
 
-## Inputs and outputs
-
-Supported input extensions: `.mp4`, `.avi`, `.mov`, `.mkv`
-
-Drop a video in `./input`:
+### CUDA
 
 ```bash
-cp /path/to/video.mp4 input/
+docker run -d \
+  --name video-detector-cuda \
+  --gpus all \
+  -v $(pwd)/input:/data/input \
+  -v $(pwd)/output:/data/output \
+  -v $(pwd)/logs:/data/logs \
+  -v $(pwd)/trained_models:/data/models \
+  -e WATCH_FOLDER=/data/input \
+  -e OUTPUT_FOLDER=/data/output \
+  -e MODELS_FOLDER=/data/models \
+  ghcr.io/dvrkoo/docker-video-api/video-deepfake-detector:latest-cuda
 ```
 
-Outputs in `./output`:
-- `video_processed.mp4`
-- `video_report.txt`
+### MPS profile image
 
-## Model loading
+```bash
+docker run -d \
+  --name video-detector-mps \
+  --platform linux/arm64 \
+  -v $(pwd)/input:/data/input \
+  -v $(pwd)/output:/data/output \
+  -v $(pwd)/logs:/data/logs \
+  -v $(pwd)/trained_models:/data/models \
+  -e WATCH_FOLDER=/data/input \
+  -e OUTPUT_FOLDER=/data/output \
+  -e MODELS_FOLDER=/data/models \
+  ghcr.io/dvrkoo/docker-video-api/video-deepfake-detector:latest-mps
+```
 
-Place model files in `./trained_models` (mounted as `/data/models` in Docker).
+## Input/output behavior
 
-Supported loading attempts:
-1. TorchScript (`torch.jit.load`)
-2. ResNet50 binary classifier state_dict (`2` classes, fake class index `1`)
-
-If no valid model is present, fallback model `always_real` is used so the pipeline remains runnable.
+- Supported input: `.mp4`, `.avi`, `.mov`, `.mkv`
+- Drop video into `./input`
+- Output files in `./output`:
+  - `<video>_processed.mp4`
+  - `<video>_report.txt`
 
 ## Environment variables
 
@@ -101,12 +146,26 @@ If no valid model is present, fallback model `always_real` is used so the pipeli
 - `AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA` (`true/false`, default `true`)
 - `FRAME_FAKE_THRESHOLD` (default `0.5`)
 - `VIDEO_FAKE_THRESHOLD` (default `0.4`)
-- `INFERENCE_BATCH_SIZE` (default `32`, controls GPU inference batching)
-- `DETECTOR_BACKEND` (`auto`, `retinaface`, `dlib`; default `auto`)
+- `INFERENCE_BATCH_SIZE` (default `32`)
+- `DETECTOR_BACKEND` (`auto`, `retinaface`, `dlib`)
 - `RETINAFACE_DET_SIZE` (default `640`)
-- `RETINAFACE_BOX_SCALE` (default `1.25`, expands RetinaFace boxes to approximate dlib crop size)
-For native MPS runs, install RetinaFace dependencies if you want GPU-first detection:
+- `RETINAFACE_BOX_SCALE` (default `1.25`)
+
+## Faster rebuilds
+
+BuildKit cache mounts are already enabled in Dockerfiles.
+
+Use BuildKit locally:
 
 ```bash
-pip install insightface onnxruntime
+DOCKER_BUILDKIT=1 docker compose build
 ```
+
+## CI/CD
+
+On each push/PR:
+- unit tests
+- CPU docker build + smoke test
+
+On pushes to `main`:
+- publish GHCR images for CPU, CUDA, and MPS profile.
