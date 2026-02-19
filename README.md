@@ -11,6 +11,7 @@ Only **RGB models** are used. Wavelet/frequency models are not part of this modu
 ## Detection logic
 
 - The pipeline detects faces per frame and processes **only the biggest detected face**.
+- On CUDA/MPS profiles, RetinaFace is used (with dlib fallback if unavailable).
 - If at least one enabled model predicts fake above threshold (default `0.5`), the frame is marked fake.
 - Fake frames are drawn with a red box and label `FAKE`.
 - Real frames are drawn with a green box and label `REAL`.
@@ -91,5 +92,15 @@ If no valid model is present, fallback model `always_real` is used so the pipeli
 - `OUTPUT_FOLDER` (default `/data/output` in Docker, `./output` native)
 - `MODELS_FOLDER` (default `/data/models` in Docker, `./trained_models` native)
 - `FORCE_CPU` (`true/false`)
+- `AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA` (`true/false`, default `true`)
 - `FRAME_FAKE_THRESHOLD` (default `0.5`)
 - `VIDEO_FAKE_THRESHOLD` (default `0.4`)
+- `INFERENCE_BATCH_SIZE` (default `32`, controls GPU inference batching)
+- `DETECTOR_BACKEND` (`auto`, `retinaface`, `dlib`; default `auto`)
+- `RETINAFACE_DET_SIZE` (default `640`)
+- `RETINAFACE_BOX_SCALE` (default `1.25`, expands RetinaFace boxes to approximate dlib crop size)
+For native MPS runs, install RetinaFace dependencies if you want GPU-first detection:
+
+```bash
+pip install insightface onnxruntime
+```

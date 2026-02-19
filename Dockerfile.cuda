@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.1-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -25,23 +25,17 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 &
     update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 
 COPY requirements.txt .
+COPY requirements-no-torch.txt .
 
 RUN pip install --no-cache-dir uv
 
 RUN uv pip install --system --no-cache \
-      --index-url https://download.pytorch.org/whl/cu121 \
-      torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0
-
-RUN python - << 'EOF'
-from pathlib import Path
-req_path = Path('requirements.txt')
-lines = req_path.read_text().splitlines()
-skip = {'torch', 'torchvision', 'torchaudio'}
-filtered = [l for l in lines if not any(l.startswith(name + '==') for name in skip) and l.strip()]
-Path('requirements-no-torch.txt').write_text("\n".join(filtered) + "\n")
-EOF
+      --index-url https://download.pytorch.org/whl/cu128 \
+      torch torchvision torchaudio
 
 RUN uv pip install --system --no-cache -r requirements-no-torch.txt
+
+RUN uv pip install --system --no-cache onnxruntime-gpu insightface
 
 COPY . .
 

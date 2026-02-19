@@ -9,7 +9,9 @@ import torch
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+from detectors import build_detector
 import logger_config
+from models.registry import load_models
 from video_processor import process_video_file
 
 logger = logging.getLogger(__name__)
@@ -19,21 +21,52 @@ OUTPUT_FOLDER = os.getenv("OUTPUT_FOLDER", "./output" if not os.path.exists("/da
 MODELS_FOLDER = os.getenv("MODELS_FOLDER", "./trained_models")
 FRAME_FAKE_THRESHOLD = float(os.getenv("FRAME_FAKE_THRESHOLD", "0.5"))
 VIDEO_FAKE_THRESHOLD = float(os.getenv("VIDEO_FAKE_THRESHOLD", "0.4"))
+INFERENCE_BATCH_SIZE = int(os.getenv("INFERENCE_BATCH_SIZE", "32"))
+DETECTOR_BACKEND = os.getenv("DETECTOR_BACKEND", "auto")
+RETINAFACE_DET_SIZE = int(os.getenv("RETINAFACE_DET_SIZE", "640"))
+RETINAFACE_BOX_SCALE = float(os.getenv("RETINAFACE_BOX_SCALE", "1.25"))
 FORCE_CPU = os.getenv("FORCE_CPU", "false").lower() == "true"
+AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA = (
+    os.getenv("AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA", "true").lower() == "true"
+)
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
 
 os.makedirs(WATCH_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 os.makedirs(MODELS_FOLDER, exist_ok=True)
 
-if FORCE_CPU:
-    DEVICE = torch.device("cpu")
-else:
-    DEVICE = torch.device(
+def _resolve_device() -> torch.device:
+    if FORCE_CPU:
+        return torch.device("cpu")
+
+    device = torch.device(
         "cuda"
         if torch.cuda.is_available()
         else "mps" if torch.backends.mps.is_available() else "cpu"
     )
+
+    if device.type == "cuda":
+        capability = torch.cuda.get_device_capability()
+        gpu_arch = f"sm_{capability[0]}{capability[1]}"
+        supported_arches = {
+            arch for arch in torch.cuda.get_arch_list() if arch.startswith("sm_")
+        }
+        if gpu_arch not in supported_arches:
+            logger.warning(
+                "Detected GPU architecture %s but this PyTorch build supports %s",
+                gpu_arch,
+                " ".join(sorted(supported_arches)),
+            )
+            if AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA:
+                logger.warning(
+                    "Falling back to CPU because AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA=true"
+                )
+                return torch.device("cpu")
+
+    return device
+
+
+DEVICE = _resolve_device()
 
 logger.info("Starting video deepfake docker module")
 logger.info("Watch folder: %s", WATCH_FOLDER)
@@ -42,6 +75,17 @@ logger.info("Models folder: %s", MODELS_FOLDER)
 logger.info("Using device: %s", DEVICE)
 logger.info("Frame fake threshold: %.2f", FRAME_FAKE_THRESHOLD)
 logger.info("Video fake threshold: %.2f", VIDEO_FAKE_THRESHOLD)
+logger.info("Inference batch size: %d", INFERENCE_BATCH_SIZE)
+logger.info("Detector backend: %s", DETECTOR_BACKEND)
+
+LOADED_MODELS = load_models(models_dir=MODELS_FOLDER, device=DEVICE)
+FACE_DETECTOR = build_detector(
+    device=DEVICE,
+    backend=DETECTOR_BACKEND,
+    retinaface_det_size=RETINAFACE_DET_SIZE,
+    retinaface_box_scale=RETINAFACE_BOX_SCALE,
+)
+logger.info("Loaded %d models at startup", len(LOADED_MODELS))
 
 file_queue: queue.Queue[str] = queue.Queue()
 
@@ -97,6 +141,9 @@ def process_file(file_path: str) -> None:
         models_dir=MODELS_FOLDER,
         frame_fake_threshold=FRAME_FAKE_THRESHOLD,
         video_fake_threshold=VIDEO_FAKE_THRESHOLD,
+        models=LOADED_MODELS,
+        detector=FACE_DETECTOR,
+        inference_batch_size=INFERENCE_BATCH_SIZE,
     )
     logger.info("Processing completed: %s", result)
     _cleanup_accelerator_cache()

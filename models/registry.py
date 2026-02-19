@@ -4,10 +4,8 @@ import logging
 from pathlib import Path
 from typing import Dict, List
 
-import numpy as np
 import torch
 import torchvision
-from torchvision import transforms
 
 from .dummy import AlwaysRealModel
 
@@ -20,21 +18,12 @@ class TorchRGBModel:
         self.model = model
         self.device = device
         self.post = torch.nn.Softmax(dim=1)
-        self.preprocess = transforms.Compose(
-            [
-                transforms.ToPILImage(),
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5] * 3, [0.5] * 3),
-            ]
-        )
 
-    def predict(self, face_rgb: np.ndarray) -> float:
-        tensor = self.preprocess(face_rgb).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            out = self.model(tensor)
+    def predict_batch(self, batch_tensor: torch.Tensor) -> torch.Tensor:
+        with torch.inference_mode():
+            out = self.model(batch_tensor)
             probs = self.post(out)
-        return float(probs[0, 1].item())
+        return probs[:, 1]
 
 
 class TorchScriptRGBModel:
@@ -43,23 +32,14 @@ class TorchScriptRGBModel:
         self.model = model
         self.device = device
         self.post = torch.nn.Softmax(dim=1)
-        self.preprocess = transforms.Compose(
-            [
-                transforms.ToPILImage(),
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5] * 3, [0.5] * 3),
-            ]
-        )
 
-    def predict(self, face_rgb: np.ndarray) -> float:
-        tensor = self.preprocess(face_rgb).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            out = self.model(tensor)
+    def predict_batch(self, batch_tensor: torch.Tensor) -> torch.Tensor:
+        with torch.inference_mode():
+            out = self.model(batch_tensor)
             probs = self.post(out)
         if probs.ndim == 1:
-            return float(probs[-1].item())
-        return float(probs[0, -1].item())
+            return probs.unsqueeze(0)[..., -1]
+        return probs[:, -1]
 
 
 def _clean_state_dict_keys(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import numpy as np
+import torch
 
 
 class AlwaysRealModel:
@@ -9,6 +9,5 @@ class AlwaysRealModel:
     def __init__(self, name: str = "always_real") -> None:
         self.name = name
 
-    def predict(self, face_rgb: np.ndarray) -> float:
-        _ = face_rgb
-        return 0.0
+    def predict_batch(self, batch_tensor: torch.Tensor) -> torch.Tensor:
+        return torch.zeros(batch_tensor.shape[0], device=batch_tensor.device)
