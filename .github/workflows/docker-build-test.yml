@@ -61,6 +61,8 @@ jobs:
           push: false
           tags: ${{ env.DOCKER_IMAGE_NAME }}:test
           load: true
+          cache-from: type=gha,scope=cpu-smoke
+          cache-to: type=gha,mode=max,scope=cpu-smoke
 
       - name: Test CPU image (smoke test)
         run: |
@@ -102,9 +104,15 @@ jobs:
           - name: cpu
             dockerfile: Dockerfile
             suffix: ""
+            platforms: linux/amd64
           - name: cuda
             dockerfile: Dockerfile.cuda
             suffix: "-cuda"
+            platforms: linux/amd64
+          - name: mps
+            dockerfile: Dockerfile.mps
+            suffix: "-mps"
+            platforms: linux/arm64
 
     steps:
       - name: Checkout code
@@ -138,7 +146,7 @@ jobs:
         with:
           context: .
           file: ./${{ matrix.variant.dockerfile }}
-          platforms: linux/amd64
+          platforms: ${{ matrix.variant.platforms }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

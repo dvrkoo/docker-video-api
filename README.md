@@ -56,10 +56,16 @@ CUDA:
 docker-compose --profile cuda up video-detector-cuda
 ```
 
-MPS (Docker on Apple Silicon may still run CPU-only in practice):
+MPS profile for Apple Silicon Docker (linux/arm64 image, CPU execution inside container):
 
 ```bash
 docker-compose --profile mps up video-detector-mps
+```
+
+For faster rebuilds on local machines, enable BuildKit:
+
+```bash
+DOCKER_BUILDKIT=1 docker compose build
 ```
 
 ## Inputs and outputs

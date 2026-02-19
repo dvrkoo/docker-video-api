@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM nvidia/cuda:12.8.1-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -27,15 +28,15 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 &
 COPY requirements.txt .
 COPY requirements-no-torch.txt .
 
-RUN pip install --no-cache-dir uv
+RUN --mount=type=cache,target=/root/.cache/pip pip install --no-cache-dir uv
 
-RUN uv pip install --system --no-cache \
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --system --no-cache \
       --index-url https://download.pytorch.org/whl/cu128 \
       torch torchvision torchaudio
 
-RUN uv pip install --system --no-cache -r requirements-no-torch.txt
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --system --no-cache -r requirements-no-torch.txt
 
-RUN uv pip install --system --no-cache onnxruntime-gpu insightface
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --system --no-cache onnxruntime-gpu insightface
 
 COPY . .
 

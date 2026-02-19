@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.11-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -21,13 +22,13 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 COPY requirements-no-torch.txt .
 
-RUN pip install --no-cache-dir uv
+RUN --mount=type=cache,target=/root/.cache/pip pip install --no-cache-dir uv
 
-RUN uv pip install --system --no-cache \
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --system --no-cache \
       --index-url https://download.pytorch.org/whl/cpu \
       torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0
 
-RUN uv pip install --system --no-cache -r requirements-no-torch.txt
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --system --no-cache -r requirements-no-torch.txt
 
 COPY . .
 

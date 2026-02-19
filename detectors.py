@@ -49,15 +49,19 @@ class DlibDetector:
 
 class RetinaFaceDetector:
     def __init__(self, device: torch.device, det_size: int = 640, box_scale: float = 1.25):
+        import onnxruntime as ort
         from insightface.app import FaceAnalysis
 
         self.box_scale = box_scale
+        available = set(ort.get_available_providers())
         providers = ["CPUExecutionProvider"]
         if device.type == "cuda":
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            if "CUDAExecutionProvider" in available:
+                providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
             ctx_id = 0
         elif device.type == "mps":
-            providers = ["CoreMLExecutionProvider", "CPUExecutionProvider"]
+            if "CoreMLExecutionProvider" in available:
+                providers = ["CoreMLExecutionProvider", "CPUExecutionProvider"]
             ctx_id = -1
         else:
             ctx_id = -1
@@ -91,9 +95,11 @@ def build_detector(
     retinaface_box_scale: float = 1.25,
 ):
     normalized = backend.lower().strip()
-    wants_retina = normalized in {"retinaface", "auto"}
+    wants_retina = normalized == "retinaface" or (
+        normalized == "auto" and device.type in {"cuda", "mps"}
+    )
 
-    if wants_retina and device.type in {"cuda", "mps"}:
+    if wants_retina:
         try:
             return RetinaFaceDetector(
                 device=device,

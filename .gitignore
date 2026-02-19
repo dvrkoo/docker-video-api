@@ -18,3 +18,9 @@ logs/
 *.avi
 *.mov
 *.mkv
+
+trained_models/*.pt
+trained_models/*.pth
+trained_models/**/*.pt
+trained_models/**/*.pth
+!trained_models/README.md

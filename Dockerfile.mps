@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.11
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -19,9 +20,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+COPY requirements-no-torch.txt .
 
-RUN pip install --no-cache-dir uv
-RUN uv pip install --system --no-cache -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip pip install --no-cache-dir uv
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --system --no-cache \
+      --index-url https://download.pytorch.org/whl/cpu \
+      torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --system --no-cache -r requirements-no-torch.txt
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --system --no-cache insightface onnxruntime
 
 COPY . .
 
@@ -29,7 +35,7 @@ ENV WATCH_FOLDER=/data/input
 ENV OUTPUT_FOLDER=/data/output
 ENV MODELS_FOLDER=/data/models
 ENV LOG_FILE=/data/logs/app.log
-ENV FORCE_CPU=true
+ENV FORCE_CPU=false
 ENV FRAME_FAKE_THRESHOLD=0.5
 ENV VIDEO_FAKE_THRESHOLD=0.4
 

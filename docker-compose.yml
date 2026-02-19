@@ -53,6 +53,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.mps
+    platform: linux/arm64
     container_name: video-detector-mps
     volumes:
       - ./input:/data/input
@@ -64,6 +65,7 @@ services:
       - OUTPUT_FOLDER=/data/output
       - MODELS_FOLDER=/data/models
       - LOG_FILE=/data/logs/app.log
+      - FORCE_CPU=false
       - FRAME_FAKE_THRESHOLD=0.5
       - VIDEO_FAKE_THRESHOLD=0.4
       - INFERENCE_BATCH_SIZE=32
