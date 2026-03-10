@@ -4,7 +4,6 @@ import logging
 from typing import List, Tuple
 
 import cv2
-import dlib
 import torch
 
 logger = logging.getLogger(__name__)
@@ -35,6 +34,8 @@ def _expand_bbox(
 
 class DlibDetector:
     def __init__(self, upscale: int = 1):
+        import dlib
+
         self.detector = dlib.get_frontal_face_detector()
         self.upscale = upscale
 
