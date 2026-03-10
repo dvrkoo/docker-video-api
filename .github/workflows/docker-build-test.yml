@@ -41,8 +41,8 @@ jobs:
           flags: unittests
           fail_ci_if_error: false
 
-  docker-build:
-    name: Build Docker Image
+  docker-smoke:
+    name: Build CPU Image Smoke Test
     runs-on: ubuntu-latest
     needs: test-unit
 
@@ -90,10 +90,10 @@ jobs:
           docker stop test-container
           docker rm test-container
 
-  docker-build-publish:
+  docker-publish:
     name: Build and Publish Docker Images
     runs-on: ubuntu-latest
-    needs: docker-build
+    needs: docker-smoke
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
