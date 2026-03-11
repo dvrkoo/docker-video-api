@@ -11,7 +11,7 @@ def test_summarize_counts_fake_video_over_threshold():
 
     assert stats.fake_percent == 50.0
     assert stats.real_percent == 50.0
-    assert stats.verdict == "VIDEO_FAKE_NOT_FALSE_POSITIVE"
+    assert stats.verdict == "FAKE"
 
 
 def test_summarize_counts_mostly_real_below_threshold():
@@ -24,7 +24,7 @@ def test_summarize_counts_mostly_real_below_threshold():
 
     assert stats.fake_percent == 20.0
     assert stats.real_percent == 80.0
-    assert stats.verdict == "MOSTLY_REAL"
+    assert stats.verdict == "REAL"
 
 
 def test_summarize_counts_no_faces():

@@ -42,11 +42,7 @@ def summarize_counts(
     else:
         fake_percent = 100.0 * (fake_face_frames / face_frames)
         real_percent = 100.0 - fake_percent
-        verdict = (
-            "VIDEO_FAKE_NOT_FALSE_POSITIVE"
-            if (fake_face_frames / face_frames) >= video_fake_threshold
-            else "MOSTLY_REAL"
-        )
+        verdict = "FAKE" if (fake_face_frames / face_frames) >= video_fake_threshold else "REAL"
 
     return VideoStats(
         total_frames=total_frames,
@@ -125,30 +121,17 @@ def _write_report(
         f"timestamp={datetime.utcnow().isoformat()}Z",
         f"input_video={input_video.name}",
         f"output_video={output_video.name}",
-        f"device={device}",
-        f"frame_fake_threshold={frame_fake_threshold:.4f}",
-        f"video_fake_threshold={video_fake_threshold:.4f}",
         f"total_frames={stats.total_frames}",
-        f"face_frames={stats.face_frames}",
-        f"fake_face_frames={stats.fake_face_frames}",
-        f"real_face_frames={stats.real_face_frames}",
-        f"fake_percent_over_face_frames={stats.fake_percent:.2f}",
-        f"real_percent_over_face_frames={stats.real_percent:.2f}",
-        f"verdict={stats.verdict}",
-        "model_flagged_frames:",
+        f"face_frames_considered={stats.face_frames}",
+        f"fake_frames={stats.fake_face_frames}",
     ]
 
-    for name, count in sorted(stats.model_flagged_frames.items()):
-        lines.append(f"  - {name}: {count}")
-
     if stats.face_frames == 0:
-        lines.append("note=No faces were detected in this video")
-    elif stats.fake_percent >= (video_fake_threshold * 100.0):
-        lines.append(
-            "note=Fake percentage is above threshold; result is considered not a false positive"
-        )
+        lines.append("result=No faces detected")
+    elif stats.verdict == "FAKE":
+        lines.append(f"result={stats.fake_percent:.2f}% fake")
     else:
-        lines.append("note=Fake percentage is below threshold")
+        lines.append(f"result={stats.real_percent:.2f}% real")
 
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
