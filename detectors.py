@@ -67,9 +67,17 @@ class RetinaFaceDetector:
         else:
             ctx_id = -1
 
-        self.app = FaceAnalysis(name="buffalo_l", providers=providers)
+        self.app = FaceAnalysis(
+            name="buffalo_l",
+            providers=providers,
+            allowed_modules=["detection"],
+        )
         self.app.prepare(ctx_id=ctx_id, det_size=(det_size, det_size))
-        logger.info("RetinaFace initialized with providers: %s", providers)
+        logger.info(
+            "RetinaFace initialized with providers: %s, allowed_modules=['detection'], det_size=%d",
+            providers,
+            det_size,
+        )
 
     def detect(self, frame_bgr) -> List[BBox]:
         faces = self.app.get(frame_bgr)

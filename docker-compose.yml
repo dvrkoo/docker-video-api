@@ -40,9 +40,9 @@ services:
       - AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA=true
       - FRAME_FAKE_THRESHOLD=0.5
       - VIDEO_FAKE_THRESHOLD=0.4
-      - INFERENCE_BATCH_SIZE=32
+      - INFERENCE_BATCH_SIZE=64
       - DETECTOR_BACKEND=retinaface
-      - RETINAFACE_DET_SIZE=640
+      - RETINAFACE_DET_SIZE=512
       - RETINAFACE_BOX_SCALE=1.25
     gpus: all
     restart: unless-stopped

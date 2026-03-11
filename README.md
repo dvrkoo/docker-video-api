@@ -132,6 +132,7 @@ docker run -d \
 ## Input/output behavior
 
 - Supported input: `.mp4`, `.avi`, `.mov`, `.mkv`
+- On CUDA/MPS profiles, RetinaFace runs in detection-only mode for lower overhead.
 - Drop video into `./input`
 - Output files in `./output`:
   - `<video>_processed.mp4`
@@ -146,9 +147,9 @@ docker run -d \
 - `AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA` (`true/false`, default `true`)
 - `FRAME_FAKE_THRESHOLD` (default `0.5`)
 - `VIDEO_FAKE_THRESHOLD` (default `0.4`)
-- `INFERENCE_BATCH_SIZE` (default `32`)
+- `INFERENCE_BATCH_SIZE` (default `32`; CUDA compose profile uses `64`)
 - `DETECTOR_BACKEND` (`auto`, `retinaface`, `dlib`)
-- `RETINAFACE_DET_SIZE` (default `640`)
+- `RETINAFACE_DET_SIZE` (default `640`; CUDA compose profile uses `512`)
 - `RETINAFACE_BOX_SCALE` (default `1.25`)
 
 ## Faster rebuilds
