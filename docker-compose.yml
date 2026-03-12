@@ -41,7 +41,7 @@ services:
       - FRAME_FAKE_THRESHOLD=0.5
       - VIDEO_FAKE_THRESHOLD=0.4
       - INFERENCE_BATCH_SIZE=64
-      - DETECTOR_BACKEND=retinaface
+      - DETECTOR_BACKEND=dlib
       - RETINAFACE_DET_SIZE=512
       - RETINAFACE_BOX_SCALE=1.25
     gpus: all
@@ -69,9 +69,27 @@ services:
       - FRAME_FAKE_THRESHOLD=0.5
       - VIDEO_FAKE_THRESHOLD=0.4
       - INFERENCE_BATCH_SIZE=32
-      - DETECTOR_BACKEND=retinaface
+      - DETECTOR_BACKEND=dlib
       - RETINAFACE_DET_SIZE=640
       - RETINAFACE_BOX_SCALE=1.25
     restart: unless-stopped
     profiles:
       - mps
+
+  video-detector-debug:
+    build:
+      context: .
+      dockerfile: Dockerfile.debug
+    container_name: video-detector-debug
+    volumes:
+      - ./input:/data/input
+      - ./output:/data/output
+      - ./logs:/data/logs
+      - ./trained_models:/data/models
+      - ./:/app
+    env_file:
+      - env.debug
+    gpus: all
+    restart: unless-stopped
+    profiles:
+      - debug

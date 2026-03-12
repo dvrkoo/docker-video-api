@@ -7,8 +7,6 @@ from typing import Dict, List
 import torch
 import torchvision
 
-from .dummy import AlwaysRealModel
-
 logger = logging.getLogger(__name__)
 
 
@@ -45,10 +43,15 @@ class TorchScriptRGBModel:
 def _clean_state_dict_keys(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     cleaned: Dict[str, torch.Tensor] = {}
     for key, value in state_dict.items():
-        if key.startswith("module."):
-            cleaned[key[len("module.") :]] = value
-        else:
-            cleaned[key] = value
+        normalized = key
+        while normalized.startswith("module.") or normalized.startswith("model."):
+            if normalized.startswith("module."):
+                normalized = normalized[len("module.") :]
+                continue
+            if normalized.startswith("model."):
+                normalized = normalized[len("model.") :]
+                continue
+        cleaned[normalized] = value
     return cleaned
 
 
@@ -65,7 +68,7 @@ def _load_resnet50_binary(path: Path, device: torch.device) -> torch.nn.Module:
         raise ValueError("Checkpoint is not a valid state dict")
 
     state_dict = _clean_state_dict_keys(state_dict)
-    model.load_state_dict(state_dict, strict=False)
+    model.load_state_dict(state_dict, strict=True)
     model = model.to(device)
     model.eval()
     return model
@@ -89,19 +92,20 @@ def _try_load_model(path: Path, device: torch.device):
 def load_models(models_dir: str, device: torch.device) -> List:
     root = Path(models_dir)
     if not root.exists():
-        logger.warning("Models directory does not exist: %s", root)
-        return [AlwaysRealModel()]
+        raise FileNotFoundError(f"Models directory does not exist: {root}")
 
     files = sorted(root.glob("*.pt")) + sorted(root.glob("*.pth"))
     loaded = []
+    failures = []
     for path in files:
         try:
             loaded.append(_try_load_model(path, device))
         except Exception as exc:
+            failures.append((path.name, str(exc)))
             logger.error("Could not load model %s: %s", path.name, exc)
 
     if not loaded:
-        logger.warning("No valid RGB models found, using AlwaysRealModel fallback")
-        loaded = [AlwaysRealModel()]
+        details = "; ".join(f"{name}: {error}" for name, error in failures) or "no .pt/.pth files found"
+        raise RuntimeError(f"No valid RGB models loaded from {root}. Details: {details}")
 
     return loaded

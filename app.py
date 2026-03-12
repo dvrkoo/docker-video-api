@@ -16,24 +16,33 @@ from video_processor import process_video_file
 
 logger = logging.getLogger(__name__)
 
-WATCH_FOLDER = os.getenv("WATCH_FOLDER", "./input" if not os.path.exists("/data") else "/data/input")
-OUTPUT_FOLDER = os.getenv("OUTPUT_FOLDER", "./output" if not os.path.exists("/data") else "/data/output")
+WATCH_FOLDER = os.getenv(
+    "WATCH_FOLDER", "./input" if not os.path.exists("/data") else "/data/input"
+)
+OUTPUT_FOLDER = os.getenv(
+    "OUTPUT_FOLDER", "./output" if not os.path.exists("/data") else "/data/output"
+)
 MODELS_FOLDER = os.getenv("MODELS_FOLDER", "./trained_models")
 FRAME_FAKE_THRESHOLD = float(os.getenv("FRAME_FAKE_THRESHOLD", "0.5"))
 VIDEO_FAKE_THRESHOLD = float(os.getenv("VIDEO_FAKE_THRESHOLD", "0.4"))
 INFERENCE_BATCH_SIZE = int(os.getenv("INFERENCE_BATCH_SIZE", "32"))
-DETECTOR_BACKEND = os.getenv("DETECTOR_BACKEND", "auto")
+DETECTOR_BACKEND = os.getenv("DETECTOR_BACKEND", "dlib")
+MTCNN_BOX_SCALE = float(os.getenv("MTCNN_BOX_SCALE", "1.0"))
 RETINAFACE_DET_SIZE = int(os.getenv("RETINAFACE_DET_SIZE", "640"))
 RETINAFACE_BOX_SCALE = float(os.getenv("RETINAFACE_BOX_SCALE", "1.25"))
 FORCE_CPU = os.getenv("FORCE_CPU", "false").lower() == "true"
 AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA = (
     os.getenv("AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA", "true").lower() == "true"
 )
+GPU_PREPROCESS = os.getenv("GPU_PREPROCESS", "false").lower() == "true"
+DLIB_SCALE_FACTOR = float(os.getenv("DLIB_SCALE_FACTOR", "1.0"))
+DLIB_NUM_WORKERS = int(os.getenv("DLIB_NUM_WORKERS", "1"))
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
 
 os.makedirs(WATCH_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 os.makedirs(MODELS_FOLDER, exist_ok=True)
+
 
 def _resolve_device() -> torch.device:
     if FORCE_CPU:
@@ -42,7 +51,9 @@ def _resolve_device() -> torch.device:
     device = torch.device(
         "cuda"
         if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available() else "cpu"
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
     )
 
     if device.type == "cuda":
@@ -77,13 +88,18 @@ logger.info("Frame fake threshold: %.2f", FRAME_FAKE_THRESHOLD)
 logger.info("Video fake threshold: %.2f", VIDEO_FAKE_THRESHOLD)
 logger.info("Inference batch size: %d", INFERENCE_BATCH_SIZE)
 logger.info("Detector backend: %s", DETECTOR_BACKEND)
+logger.info("GPU preprocess: %s", GPU_PREPROCESS)
+logger.info("Dlib scale factor: %.2f", DLIB_SCALE_FACTOR)
+logger.info("Dlib detection workers: %d", DLIB_NUM_WORKERS)
 
 LOADED_MODELS = load_models(models_dir=MODELS_FOLDER, device=DEVICE)
 FACE_DETECTOR = build_detector(
     device=DEVICE,
     backend=DETECTOR_BACKEND,
+    mtcnn_box_scale=MTCNN_BOX_SCALE,
     retinaface_det_size=RETINAFACE_DET_SIZE,
     retinaface_box_scale=RETINAFACE_BOX_SCALE,
+    dlib_scale_factor=DLIB_SCALE_FACTOR,
 )
 logger.info("Loaded %d models at startup", len(LOADED_MODELS))
 
@@ -144,6 +160,8 @@ def process_file(file_path: str) -> None:
         models=LOADED_MODELS,
         detector=FACE_DETECTOR,
         inference_batch_size=INFERENCE_BATCH_SIZE,
+        gpu_preprocess=GPU_PREPROCESS,
+        detection_num_workers=DLIB_NUM_WORKERS,
     )
     logger.info("Processing completed: %s", result)
     _cleanup_accelerator_cache()
