@@ -10,14 +10,46 @@ Only **RGB models** are used (no wavelet/frequency models).
 
 ## What the pipeline does
 
-- Detects faces per frame and processes **only the largest detected face**.
+- Detects faces per frame and processes the **first detected face** (player-compatible).
+- Face crop follows player-style square policy with scale `1.3`.
 - Marks frame as `FAKE` if **any enabled model** predicts fake above threshold.
 - Draws red bbox for fake, green bbox for real.
 - Computes percentages over **face frames only**:
   - `fake_face_frames / face_frames`
 - Video verdict:
-  - `VIDEO_FAKE_NOT_FALSE_POSITIVE` if fake ratio >= `VIDEO_FAKE_THRESHOLD` (default `0.40`)
-  - otherwise `MOSTLY_REAL`
+  - `FAKE` if fake ratio >= `VIDEO_FAKE_THRESHOLD` (default `0.40`)
+  - `REAL` otherwise
+  - `NO_FACES_DETECTED` if no faces were found in any frame
+
+## Core processing pipeline
+
+`video_processor.py` is the main processing unit. It runs one video end-to-end and returns a result dict.
+
+### Parallel face detection
+
+Frames are read in chunks of `DLIB_NUM_WORKERS` at a time. A `ThreadPoolExecutor` with that many worker threads runs face detection in parallel across the chunk:
+
+```
+chunk (N frames) → ThreadPoolExecutor (N workers) → face_results (N lists of bboxes)
+```
+
+Each worker thread owns a **private detector instance** created at pool startup via the `initializer` parameter. This is required for dlib: `dlib.get_frontal_face_detector()` is not thread-safe — calling `.detect()` on the same instance from multiple threads simultaneously causes a segfault in dlib's internal C++ state. Thread-local instances eliminate the race condition without any locking overhead.
+
+- `DlibDetector.make_worker()` — constructs a new independent instance per thread
+- `MTCNNDetector.make_worker()` / `RetinaFaceDetector.make_worker()` — return `self` (GPU models are safe to share)
+
+### Inference batching
+
+After detection, face crops accumulate in a pending buffer. When the buffer reaches `INFERENCE_BATCH_SIZE`, all crops are batched into a single tensor and run through every loaded model in one forward pass. This keeps GPU utilisation high and avoids per-frame inference overhead.
+
+### GPU preprocessing
+
+When `GPU_PREPROCESS=true`, raw face crop arrays (HWC uint8) are sent to the GPU and resized/normalised there with `torch.nn.functional.interpolate`, skipping PIL and CPU torchvision transforms entirely.
+
+### Output per video
+
+- `<name>_processed.mp4` — original video with per-frame bbox overlay
+- `<name>_report.txt` — plain-text report with frame counts, fake percentage, and verdict
 
 ## Get model weights
 
@@ -132,7 +164,8 @@ docker run -d \
 ## Input/output behavior
 
 - Supported input: `.mp4`, `.avi`, `.mov`, `.mkv`
-- On CUDA/MPS profiles, RetinaFace runs in detection-only mode for lower overhead.
+- Default detector is dlib (player-compatible behavior).
+- RetinaFace and MTCNN remain available as optional override backends.
 - Drop video into `./input`
 - Output files in `./output`:
   - `<video>_processed.mp4`
@@ -140,17 +173,23 @@ docker run -d \
 
 ## Environment variables
 
-- `WATCH_FOLDER` (default `/data/input` in Docker, `./input` native)
-- `OUTPUT_FOLDER` (default `/data/output` in Docker, `./output` native)
-- `MODELS_FOLDER` (default `/data/models` in Docker, `./trained_models` native)
-- `FORCE_CPU` (`true/false`)
-- `AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA` (`true/false`, default `true`)
-- `FRAME_FAKE_THRESHOLD` (default `0.5`)
-- `VIDEO_FAKE_THRESHOLD` (default `0.4`)
-- `INFERENCE_BATCH_SIZE` (default `32`; CUDA compose profile uses `64`)
-- `DETECTOR_BACKEND` (`auto`, `retinaface`, `dlib`)
-- `RETINAFACE_DET_SIZE` (default `640`; CUDA compose profile uses `512`)
-- `RETINAFACE_BOX_SCALE` (default `1.25`)
+| Variable | Default | Description |
+|---|---|---|
+| `WATCH_FOLDER` | `/data/input` | Folder monitored for incoming videos |
+| `OUTPUT_FOLDER` | `/data/output` | Where processed videos and reports are written |
+| `MODELS_FOLDER` | `/data/models` | Path to `.pt`/`.pth` model weight files |
+| `FORCE_CPU` | `false` | Force CPU even when GPU is available |
+| `AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA` | `true` | Fall back to CPU if GPU arch is not in PyTorch build |
+| `FRAME_FAKE_THRESHOLD` | `0.5` | Per-frame model score above which a frame is flagged fake |
+| `VIDEO_FAKE_THRESHOLD` | `0.4` | Ratio of fake face frames above which the video is `FAKE` |
+| `INFERENCE_BATCH_SIZE` | `32` | Number of face crops batched per inference pass |
+| `GPU_PREPROCESS` | `false` | Resize and normalise face crops on GPU instead of CPU |
+| `DETECTOR_BACKEND` | `dlib` | Face detector: `dlib`, `mtcnn`, `retinaface`, `auto` |
+| `DLIB_NUM_WORKERS` | `1` | Worker threads for parallel dlib face detection |
+| `DLIB_SCALE_FACTOR` | `1.0` | Pre-detection resize factor for dlib (1.0 = full resolution) |
+| `MTCNN_BOX_SCALE` | `1.0` | Bbox expansion multiplier for MTCNN |
+| `RETINAFACE_DET_SIZE` | `640` | Input resolution for RetinaFace detector |
+| `RETINAFACE_BOX_SCALE` | `1.25` | Bbox expansion multiplier for RetinaFace |
 
 ## Faster rebuilds
 

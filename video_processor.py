@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
@@ -9,10 +11,23 @@ from typing import Dict, List, Optional
 
 import cv2
 import torch
+import torch.nn.functional as F
+from PIL import Image
+from torchvision import transforms
 
 from models.registry import load_models
 
 logger = logging.getLogger(__name__)
+
+_tls = threading.local()
+
+
+def _worker_init(detector_factory):
+    _tls.detector = detector_factory()
+
+
+def _worker_detect(frame_bgr):
+    return _tls.detector.detect(frame_bgr)
 
 
 @dataclass
@@ -42,7 +57,11 @@ def summarize_counts(
     else:
         fake_percent = 100.0 * (fake_face_frames / face_frames)
         real_percent = 100.0 - fake_percent
-        verdict = "FAKE" if (fake_face_frames / face_frames) >= video_fake_threshold else "REAL"
+        verdict = (
+            "FAKE"
+            if (fake_face_frames / face_frames) >= video_fake_threshold
+            else "REAL"
+        )
 
     return VideoStats(
         total_frames=total_frames,
@@ -56,25 +75,51 @@ def summarize_counts(
     )
 
 
-def _select_largest_face(faces):
-    return max(faces, key=lambda face: (face[2] - face[0]) * (face[3] - face[1]))
+_PLAYER_RESNET_TRANSFORM = transforms.Compose(
+    [
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.5] * 3, [0.5] * 3),
+    ]
+)
 
 
-def _clamp_face_bbox(face, frame_shape):
-    h, w = frame_shape[:2]
+def _select_primary_face(faces):
+    return faces[0]
+
+
+def _player_style_bbox(face, frame_shape, scale: float = 1.3):
+    height, width = frame_shape[:2]
     x1, y1, x2, y2 = face
-    x1 = max(0, x1)
-    y1 = max(0, y1)
-    x2 = min(w, x2)
-    y2 = min(h, y2)
-    return x1, y1, x2, y2
+
+    size_bb = int(max(x2 - x1, y2 - y1) * scale)
+    center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
+
+    x1 = max(int(center_x - size_bb // 2), 0)
+    y1 = max(int(center_y - size_bb // 2), 0)
+
+    size_bb = min(width - x1, size_bb)
+    size_bb = min(height - y1, size_bb)
+
+    return x1, y1, x1 + size_bb, y1 + size_bb
 
 
 def _preprocess_face_to_tensor(face_rgb):
-    resized = cv2.resize(face_rgb, (224, 224), interpolation=cv2.INTER_AREA)
-    tensor = torch.from_numpy(resized).permute(2, 0, 1).float().div_(255.0)
-    tensor.sub_(0.5).div_(0.5)
-    return tensor
+    return _PLAYER_RESNET_TRANSFORM(Image.fromarray(face_rgb))
+
+
+def _preprocess_faces_gpu(face_crops: List, device: torch.device) -> torch.Tensor:
+    """Preprocess a list of HWC uint8 numpy face crops entirely on GPU.
+
+    Returns a (N, 3, 224, 224) float32 tensor already on *device*.
+    """
+    tensors = []
+    for crop in face_crops:
+        t = torch.from_numpy(crop).permute(2, 0, 1).unsqueeze(0).float().to(device)
+        t = F.interpolate(t, size=(224, 224), mode="bilinear", align_corners=False)
+        t = t.div_(255.0).sub_(0.5).div_(0.5)
+        tensors.append(t)
+    return torch.cat(tensors, dim=0)
 
 
 def _infer_fake_flags(
@@ -83,11 +128,12 @@ def _infer_fake_flags(
     device: torch.device,
     frame_fake_threshold: float,
     model_flagged_frames: Dict[str, int],
+    batch_already_on_device: bool = False,
 ) -> List[bool]:
     if face_batch_cpu.shape[0] == 0:
         return []
 
-    batch = face_batch_cpu.to(device)
+    batch = face_batch_cpu if batch_already_on_device else face_batch_cpu.to(device)
     frame_flags = torch.zeros(batch.shape[0], dtype=torch.bool, device=batch.device)
 
     amp_ctx = (
@@ -107,15 +153,30 @@ def _infer_fake_flags(
     return frame_flags.cpu().tolist()
 
 
+def _read_frame_chunk(cap, n: int) -> List:
+    """Read up to *n* frames from *cap*. Returns fewer than *n* at end of stream."""
+    chunk = []
+    for _ in range(n):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        chunk.append(frame)
+    return chunk
+
+
 def _write_report(
     report_path: Path,
     input_video: Path,
     output_video: Path,
-    device: torch.device,
-    frame_fake_threshold: float,
-    video_fake_threshold: float,
     stats: VideoStats,
 ) -> None:
+    if stats.verdict == "FAKE":
+        confidence = f"{stats.fake_percent:.2f}%"
+    elif stats.verdict == "REAL":
+        confidence = f"{stats.real_percent:.2f}%"
+    else:
+        confidence = "0.00%"
+
     lines: List[str] = [
         "Video Deepfake Report",
         f"timestamp={datetime.utcnow().isoformat()}Z",
@@ -124,14 +185,9 @@ def _write_report(
         f"total_frames={stats.total_frames}",
         f"face_frames_considered={stats.face_frames}",
         f"fake_frames={stats.fake_face_frames}",
+        f"result_confidence={confidence}",
+        f"result={stats.verdict}",
     ]
-
-    if stats.face_frames == 0:
-        lines.append("result=No faces detected")
-    elif stats.verdict == "FAKE":
-        lines.append(f"result={stats.fake_percent:.2f}% fake")
-    else:
-        lines.append(f"result={stats.real_percent:.2f}% real")
 
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -146,6 +202,8 @@ def process_video_file(
     models: Optional[List] = None,
     detector=None,
     inference_batch_size: int = 32,
+    gpu_preprocess: bool = False,
+    detection_num_workers: int = 1,
 ) -> Dict[str, str]:
     input_video = Path(input_path)
     output_dir = Path(output_folder)
@@ -154,7 +212,11 @@ def process_video_file(
     output_video = output_dir / f"{input_video.stem}_processed.mp4"
     report_path = output_dir / f"{input_video.stem}_report.txt"
 
-    loaded_models = models if models is not None else load_models(models_dir=models_dir, device=device)
+    loaded_models = (
+        models
+        if models is not None
+        else load_models(models_dir=models_dir, device=device)
+    )
     model_flagged_frames: Dict[str, int] = {m.name: 0 for m in loaded_models}
     if detector is None:
         from detectors import build_detector
@@ -181,7 +243,8 @@ def process_video_file(
     fake_face_frames = 0
 
     pending_frames: List[dict] = []
-    pending_face_tensors: List[torch.Tensor] = []
+    # CPU path: list of torch.Tensor; GPU path: list of np.ndarray face crops
+    pending_face_data: List = []
 
     def flush_pending() -> None:
         nonlocal fake_face_frames
@@ -189,15 +252,26 @@ def process_video_file(
             return
 
         face_flags: List[bool] = []
-        if pending_face_tensors:
-            batch_cpu = torch.stack(pending_face_tensors, dim=0)
-            face_flags = _infer_fake_flags(
-                face_batch_cpu=batch_cpu,
-                models=loaded_models,
-                device=device,
-                frame_fake_threshold=frame_fake_threshold,
-                model_flagged_frames=model_flagged_frames,
-            )
+        if pending_face_data:
+            if gpu_preprocess:
+                batch_gpu = _preprocess_faces_gpu(pending_face_data, device)
+                face_flags = _infer_fake_flags(
+                    face_batch_cpu=batch_gpu,
+                    models=loaded_models,
+                    device=device,
+                    frame_fake_threshold=frame_fake_threshold,
+                    model_flagged_frames=model_flagged_frames,
+                    batch_already_on_device=True,
+                )
+            else:
+                batch_cpu = torch.stack(pending_face_data, dim=0)
+                face_flags = _infer_fake_flags(
+                    face_batch_cpu=batch_cpu,
+                    models=loaded_models,
+                    device=device,
+                    frame_fake_threshold=frame_fake_threshold,
+                    model_flagged_frames=model_flagged_frames,
+                )
 
         for item in pending_frames:
             frame_bgr = item["frame"]
@@ -226,34 +300,51 @@ def process_video_file(
             writer.write(frame_bgr)
 
         pending_frames.clear()
-        pending_face_tensors.clear()
+        pending_face_data.clear()
 
-    logger.info("Processing video: %s", input_video.name)
-    while True:
-        ret, frame_bgr = cap.read()
-        if not ret:
-            break
+    logger.info(
+        "Processing video: %s (detection_workers=%d)",
+        input_video.name,
+        detection_num_workers,
+    )
+    with ThreadPoolExecutor(
+        max_workers=detection_num_workers,
+        initializer=_worker_init,
+        initargs=(face_detector.make_worker,),
+    ) as executor:
+        while True:
+            chunk = _read_frame_chunk(cap, detection_num_workers)
+            if not chunk:
+                break
 
-        total_frames += 1
-        faces = face_detector.detect(frame_bgr)
+            face_results = list(executor.map(_worker_detect, chunk))
 
-        entry = {"frame": frame_bgr, "bbox": None, "face_idx": None}
-        if faces:
-            face_frames += 1
-            face = _select_largest_face(faces)
-            x1, y1, x2, y2, _ = face
-            x1, y1, x2, y2 = _clamp_face_bbox((x1, y1, x2, y2), frame_bgr.shape)
-            if x2 > x1 and y2 > y1:
-                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                face_rgb = frame_rgb[y1:y2, x1:x2]
-                face_tensor = _preprocess_face_to_tensor(face_rgb)
-                entry["bbox"] = (x1, y1, x2, y2)
-                entry["face_idx"] = len(pending_face_tensors)
-                pending_face_tensors.append(face_tensor)
+            for frame_bgr, faces in zip(chunk, face_results):
+                total_frames += 1
 
-        pending_frames.append(entry)
-        if len(pending_frames) >= max(1, inference_batch_size):
-            flush_pending()
+                entry = {"frame": frame_bgr, "bbox": None, "face_idx": None}
+                if faces:
+                    face_frames += 1
+                    face = _select_primary_face(faces)
+                    x1, y1, x2, y2, _ = face
+                    x1, y1, x2, y2 = _player_style_bbox(
+                        (x1, y1, x2, y2), frame_bgr.shape
+                    )
+                    if x2 > x1 and y2 > y1:
+                        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                        face_rgb = frame_rgb[y1:y2, x1:x2]
+                        entry["bbox"] = (x1, y1, x2, y2)
+                        entry["face_idx"] = len(pending_face_data)
+                        if gpu_preprocess:
+                            pending_face_data.append(face_rgb)
+                        else:
+                            pending_face_data.append(
+                                _preprocess_face_to_tensor(face_rgb)
+                            )
+
+                pending_frames.append(entry)
+                if len(pending_frames) >= max(1, inference_batch_size):
+                    flush_pending()
 
     flush_pending()
 
@@ -272,9 +363,6 @@ def process_video_file(
         report_path=report_path,
         input_video=input_video,
         output_video=output_video,
-        device=device,
-        frame_fake_threshold=frame_fake_threshold,
-        video_fake_threshold=video_fake_threshold,
         stats=stats,
     )
 

@@ -1,21 +1,26 @@
 from detectors import _expand_bbox
-from video_processor import _clamp_face_bbox, _select_largest_face
+from video_processor import _player_style_bbox, _select_primary_face
 
 
-def test_select_largest_face_uses_area():
+def test_select_primary_face_returns_first_detected():
     faces = [
         (0, 0, 20, 20, 0.9),
         (10, 10, 80, 70, 0.8),
         (5, 5, 40, 40, 0.95),
     ]
-    largest = _select_largest_face(faces)
-    assert largest == (10, 10, 80, 70, 0.8)
+    selected = _select_primary_face(faces)
+    assert selected == (0, 0, 20, 20, 0.9)
 
 
-def test_clamp_face_bbox_inside_frame():
+def test_player_style_bbox_is_square_and_clamped():
     bbox = (-10, -5, 200, 120)
     frame_shape = (100, 150, 3)
-    assert _clamp_face_bbox(bbox, frame_shape) == (0, 0, 150, 100)
+    x1, y1, x2, y2 = _player_style_bbox(bbox, frame_shape, scale=1.3)
+    assert x1 == 0
+    assert y1 == 0
+    assert x2 <= 150
+    assert y2 <= 100
+    assert (x2 - x1) == (y2 - y1)
 
 
 def test_expand_bbox_grows_around_center_and_clamps():

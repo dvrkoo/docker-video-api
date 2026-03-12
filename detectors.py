@@ -33,23 +33,81 @@ def _expand_bbox(
 
 
 class DlibDetector:
-    def __init__(self, upscale: int = 1):
+    def __init__(self, upscale: int = 1, scale_factor: float = 1.0):
         import dlib
 
         self.detector = dlib.get_frontal_face_detector()
         self.upscale = upscale
+        self.scale_factor = scale_factor
+
+    def make_worker(self) -> "DlibDetector":
+        return DlibDetector(upscale=self.upscale, scale_factor=self.scale_factor)
 
     def detect(self, frame_bgr) -> List[BBox]:
-        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        if self.scale_factor < 1.0:
+            small = cv2.resize(
+                frame_bgr, (0, 0), fx=self.scale_factor, fy=self.scale_factor
+            )
+            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+
         faces = self.detector(gray, self.upscale)
+        inv = 1.0 / self.scale_factor if self.scale_factor < 1.0 else 1.0
         out: List[BBox] = []
         for face in faces:
-            out.append((face.left(), face.top(), face.right(), face.bottom(), 1.0))
+            out.append(
+                (
+                    int(face.left() * inv),
+                    int(face.top() * inv),
+                    int(face.right() * inv),
+                    int(face.bottom() * inv),
+                    1.0,
+                )
+            )
+        return out
+
+
+class MTCNNDetector:
+    def __init__(self, device: torch.device, box_scale: float = 1.0):
+        from facenet_pytorch import MTCNN
+
+        self.box_scale = box_scale
+        self.mtcnn = MTCNN(keep_all=True, device=device)
+        logger.info("MTCNN initialized on device=%s, box_scale=%.2f", device, box_scale)
+
+    def make_worker(self) -> "MTCNNDetector":
+        return self  # GPU model; shared instance is safe
+
+    def detect(self, frame_bgr) -> List[BBox]:
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        boxes, probs = self.mtcnn.detect(frame_rgb)
+        out: List[BBox] = []
+        if boxes is None:
+            return out
+
+        if probs is None:
+            probs = [1.0] * len(boxes)
+
+        for box, score in zip(boxes, probs):
+            x1, y1, x2, y2 = [int(v) for v in box]
+            x1, y1, x2, y2 = _expand_bbox(
+                x1=x1,
+                y1=y1,
+                x2=x2,
+                y2=y2,
+                frame_shape=frame_bgr.shape,
+                scale=self.box_scale,
+            )
+            score_val = 1.0 if score is None else float(score)
+            out.append((x1, y1, x2, y2, score_val))
         return out
 
 
 class RetinaFaceDetector:
-    def __init__(self, device: torch.device, det_size: int = 640, box_scale: float = 1.25):
+    def __init__(
+        self, device: torch.device, det_size: int = 640, box_scale: float = 1.25
+    ):
         import onnxruntime as ort
         from insightface.app import FaceAnalysis
 
@@ -79,6 +137,9 @@ class RetinaFaceDetector:
             det_size,
         )
 
+    def make_worker(self) -> "RetinaFaceDetector":
+        return self  # GPU model; shared instance is safe
+
     def detect(self, frame_bgr) -> List[BBox]:
         faces = self.app.get(frame_bgr)
         out: List[BBox] = []
@@ -100,13 +161,24 @@ class RetinaFaceDetector:
 def build_detector(
     device: torch.device,
     backend: str = "auto",
+    mtcnn_box_scale: float = 1.0,
     retinaface_det_size: int = 640,
     retinaface_box_scale: float = 1.25,
+    dlib_scale_factor: float = 1.0,
 ):
     normalized = backend.lower().strip()
+    wants_mtcnn = normalized in {"mtcnn", "auto"}
     wants_retina = normalized == "retinaface" or (
         normalized == "auto" and device.type in {"cuda", "mps"}
     )
+
+    if wants_mtcnn:
+        try:
+            return MTCNNDetector(device=device, box_scale=mtcnn_box_scale)
+        except Exception as exc:
+            logger.warning(
+                "MTCNN unavailable, trying RetinaFace/dlib fallback: %s", exc
+            )
 
     if wants_retina:
         try:
@@ -118,4 +190,4 @@ def build_detector(
         except Exception as exc:
             logger.warning("RetinaFace unavailable, falling back to dlib: %s", exc)
 
-    return DlibDetector(upscale=1)
+    return DlibDetector(upscale=1, scale_factor=dlib_scale_factor)
