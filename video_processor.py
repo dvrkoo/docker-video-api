@@ -217,6 +217,11 @@ def process_video_file(
         if models is not None
         else load_models(models_dir=models_dir, device=device)
     )
+    if not loaded_models:
+        raise RuntimeError(
+            f"No models available to process {input_path}. "
+            "Place .pt/.pth files in the models directory."
+        )
     model_flagged_frames: Dict[str, int] = {m.name: 0 for m in loaded_models}
     if detector is None:
         from detectors import build_detector

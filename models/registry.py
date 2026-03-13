@@ -25,7 +25,9 @@ class TorchRGBModel:
 
 
 class TorchScriptRGBModel:
-    def __init__(self, name: str, model: torch.jit.ScriptModule, device: torch.device) -> None:
+    def __init__(
+        self, name: str, model: torch.jit.ScriptModule, device: torch.device
+    ) -> None:
         self.name = name
         self.model = model
         self.device = device
@@ -40,7 +42,9 @@ class TorchScriptRGBModel:
         return probs[:, -1]
 
 
-def _clean_state_dict_keys(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+def _clean_state_dict_keys(
+    state_dict: Dict[str, torch.Tensor],
+) -> Dict[str, torch.Tensor]:
     cleaned: Dict[str, torch.Tensor] = {}
     for key, value in state_dict.items():
         normalized = key
@@ -92,7 +96,8 @@ def _try_load_model(path: Path, device: torch.device):
 def load_models(models_dir: str, device: torch.device) -> List:
     root = Path(models_dir)
     if not root.exists():
-        raise FileNotFoundError(f"Models directory does not exist: {root}")
+        logger.warning("Models directory does not exist: %s", root)
+        return []
 
     files = sorted(root.glob("*.pt")) + sorted(root.glob("*.pth"))
     loaded = []
@@ -105,7 +110,10 @@ def load_models(models_dir: str, device: torch.device) -> List:
             logger.error("Could not load model %s: %s", path.name, exc)
 
     if not loaded:
-        details = "; ".join(f"{name}: {error}" for name, error in failures) or "no .pt/.pth files found"
-        raise RuntimeError(f"No valid RGB models loaded from {root}. Details: {details}")
+        details = (
+            "; ".join(f"{name}: {error}" for name, error in failures)
+            or "no .pt/.pth files found"
+        )
+        logger.warning("No valid RGB models loaded from %s. Details: %s", root, details)
 
     return loaded
