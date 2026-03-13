@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
@@ -153,15 +154,23 @@ def _infer_fake_flags(
     return frame_flags.cpu().tolist()
 
 
-def _read_frame_chunk(cap, n: int) -> List:
-    """Read up to *n* frames from *cap*. Returns fewer than *n* at end of stream."""
-    chunk = []
-    for _ in range(n):
-        ret, frame = cap.read()
-        if not ret:
-            break
-        chunk.append(frame)
-    return chunk
+_FRAME_SENTINEL = object()
+
+
+def _frame_reader_thread(cap, q: queue.Queue) -> None:
+    """Background thread: decode frames from *cap* and push them onto *q*.
+
+    Sends ``_FRAME_SENTINEL`` as the last item to signal end-of-stream.
+    Runs as a daemon so it is silently killed if the main thread exits early.
+    """
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            q.put(frame)
+    finally:
+        q.put(_FRAME_SENTINEL)
 
 
 def _write_report(
@@ -312,13 +321,31 @@ def process_video_file(
         input_video.name,
         detection_num_workers,
     )
+
+    # Queue depth: keep enough frames buffered so workers never starve.
+    frame_queue: queue.Queue = queue.Queue(maxsize=detection_num_workers * 8)
+    reader = threading.Thread(
+        target=_frame_reader_thread, args=(cap, frame_queue), daemon=True
+    )
+    reader.start()
+
+    chunk_size = detection_num_workers * 4
+
     with ThreadPoolExecutor(
         max_workers=detection_num_workers,
         initializer=_worker_init,
         initargs=(face_detector.make_worker,),
     ) as executor:
-        while True:
-            chunk = _read_frame_chunk(cap, detection_num_workers)
+        done = False
+        while not done:
+            chunk = []
+            for _ in range(chunk_size):
+                item = frame_queue.get()
+                if item is _FRAME_SENTINEL:
+                    done = True
+                    break
+                chunk.append(item)
+
             if not chunk:
                 break
 

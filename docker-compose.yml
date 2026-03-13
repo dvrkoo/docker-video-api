@@ -42,6 +42,9 @@ services:
       - VIDEO_FAKE_THRESHOLD=0.4
       - INFERENCE_BATCH_SIZE=64
       - DETECTOR_BACKEND=dlib
+      - OMP_NUM_THREADS=1
+      - DLIB_NUM_WORKERS=4
+      - GPU_PREPROCESS=true
       - RETINAFACE_DET_SIZE=512
       - RETINAFACE_BOX_SCALE=1.25
     gpus: all
@@ -70,6 +73,9 @@ services:
       - VIDEO_FAKE_THRESHOLD=0.4
       - INFERENCE_BATCH_SIZE=32
       - DETECTOR_BACKEND=dlib
+      - OMP_NUM_THREADS=1
+      - DLIB_NUM_WORKERS=4
+      - GPU_PREPROCESS=true
       - RETINAFACE_DET_SIZE=640
       - RETINAFACE_BOX_SCALE=1.25
     restart: unless-stopped
