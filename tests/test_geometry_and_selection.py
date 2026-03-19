@@ -1,5 +1,5 @@
 from detectors import _expand_bbox
-from video_processor import _player_style_bbox, _select_primary_face
+from video_processor import _overlay_style, _player_style_bbox, _select_primary_face
 
 
 def test_select_primary_face_returns_first_detected():
@@ -33,3 +33,13 @@ def test_expand_bbox_grows_around_center_and_clamps():
         scale=2.0,
     )
     assert (x1, y1, x2, y2) == (30, 20, 70, 60)
+
+
+def test_overlay_style_scales_up_with_resolution():
+    small = _overlay_style((360, 640, 3))
+    large = _overlay_style((1080, 1920, 3))
+
+    assert large[0] >= small[0]  # box thickness
+    assert large[1] >= small[1]  # font scale
+    assert large[2] >= small[2]  # text thickness
+    assert large[3] >= small[3]  # label offset

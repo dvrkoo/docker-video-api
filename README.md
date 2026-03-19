@@ -3,8 +3,8 @@
 Video deepfake detection module based on the `docker-api` baseline, adapted for **video-in / video-out**.
 
 It watches an input folder, processes incoming videos, and writes:
-- annotated output video (`*_processed.mp4`)
-- report file (`*_report.txt`)
+- JSON report (`*_report.json`)
+- optional annotated output video (`*_processed.mp4`) when enabled
 
 Only **RGB models** are used (no wavelet/frequency models).
 
@@ -48,8 +48,8 @@ When `GPU_PREPROCESS=true`, raw face crop arrays (HWC uint8) are sent to the GPU
 
 ### Output per video
 
-- `<name>_processed.mp4` — original video with per-frame bbox overlay
-- `<name>_report.txt` — plain-text report with frame counts, fake percentage, and verdict
+- `<name>_report.json` — summary + per-frame predictions (`bbox_px`, `bbox_norm`, `confidence`, `is_fake`)
+- `<name>_processed.mp4` — optional annotated video with bbox + confidence overlay
 
 ## Get model weights
 
@@ -95,16 +95,44 @@ mkdir -p input output logs trained_models
 docker compose up video-detector-cpu
 ```
 
+Default behavior is JSON-only output (`OUTPUT_VIDEO_ENABLED=false`).
+
 ### CUDA (NVIDIA)
 
 ```bash
 docker compose --profile cuda up video-detector-cuda
 ```
 
+Default behavior is JSON-only output (`OUTPUT_VIDEO_ENABLED=false`).
+
 ### MPS profile (Apple Silicon Docker)
 
 ```bash
 docker compose --profile mps up video-detector-mps
+```
+
+Default behavior is JSON-only output (`OUTPUT_VIDEO_ENABLED=false`).
+
+### Debug profile (video + JSON, live code edits)
+
+```bash
+docker compose --profile debug up --force-recreate video-detector-debug
+```
+
+`env.debug` sets `OUTPUT_VIDEO_ENABLED=true`, so debug writes both JSON and annotated video.
+
+### Toggle video output per run
+
+JSON-only (default in cpu/cuda/mps):
+
+```bash
+OUTPUT_VIDEO_ENABLED=false docker compose --profile cuda up -d video-detector-cuda
+```
+
+JSON + annotated video:
+
+```bash
+OUTPUT_VIDEO_ENABLED=true docker compose --profile cuda up -d video-detector-cuda
 ```
 
 Notes:
@@ -168,8 +196,8 @@ docker run -d \
 - RetinaFace and MTCNN remain available as optional override backends.
 - Drop video into `./input`
 - Output files in `./output`:
-  - `<video>_processed.mp4`
-  - `<video>_report.txt`
+  - `<video>_report.json` (always)
+  - `<video>_processed.mp4` (only when `OUTPUT_VIDEO_ENABLED=true`)
 
 ## Environment variables
 
@@ -184,6 +212,11 @@ docker run -d \
 | `VIDEO_FAKE_THRESHOLD` | `0.4` | Ratio of fake face frames above which the video is `FAKE` |
 | `INFERENCE_BATCH_SIZE` | `32` | Number of face crops batched per inference pass |
 | `GPU_PREPROCESS` | `false` | Resize and normalise face crops on GPU instead of CPU |
+| `OUTPUT_VIDEO_ENABLED` | `false` | Write annotated output video in addition to JSON report |
+| `OUTPUT_CODEC` | `libx264` | ffmpeg codec for annotated video encoding |
+| `OUTPUT_CRF` | `23` | ffmpeg CRF quality target (lower = higher quality, larger file) |
+| `OUTPUT_PRESET` | `medium` | ffmpeg encoding speed/compression preset |
+| `OUTPUT_PIXEL_FORMAT` | `yuv420p` | ffmpeg output pixel format |
 | `DETECTOR_BACKEND` | `dlib` | Face detector: `dlib`, `mtcnn`, `retinaface`, `auto` |
 | `DLIB_NUM_WORKERS` | `1` | Worker threads for parallel dlib face detection |
 | `DLIB_SCALE_FACTOR` | `1.0` | Pre-detection resize factor for dlib (1.0 = full resolution) |

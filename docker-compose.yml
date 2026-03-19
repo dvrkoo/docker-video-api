@@ -45,6 +45,11 @@ services:
       - OMP_NUM_THREADS=1
       - DLIB_NUM_WORKERS=4
       - GPU_PREPROCESS=false
+      - OUTPUT_CODEC=libx264
+      - OUTPUT_CRF=23
+      - OUTPUT_PRESET=medium
+      - OUTPUT_PIXEL_FORMAT=yuv420p
+      - OUTPUT_VIDEO_ENABLED=false
       - RETINAFACE_DET_SIZE=512
       - RETINAFACE_BOX_SCALE=1.25
     gpus: all
@@ -76,6 +81,11 @@ services:
       - OMP_NUM_THREADS=1
       - DLIB_NUM_WORKERS=4
       - GPU_PREPROCESS=false
+      - OUTPUT_CODEC=libx264
+      - OUTPUT_CRF=23
+      - OUTPUT_PRESET=medium
+      - OUTPUT_PIXEL_FORMAT=yuv420p
+      - OUTPUT_VIDEO_ENABLED=false
       - RETINAFACE_DET_SIZE=640
       - RETINAFACE_BOX_SCALE=1.25
     restart: unless-stopped

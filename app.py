@@ -37,6 +37,11 @@ AUTO_FALLBACK_CPU_ON_UNSUPPORTED_CUDA = (
 GPU_PREPROCESS = os.getenv("GPU_PREPROCESS", "false").lower() == "true"
 DLIB_SCALE_FACTOR = float(os.getenv("DLIB_SCALE_FACTOR", "1.0"))
 DLIB_NUM_WORKERS = int(os.getenv("DLIB_NUM_WORKERS", "1"))
+OUTPUT_CODEC = os.getenv("OUTPUT_CODEC", "libx264")
+OUTPUT_CRF = int(os.getenv("OUTPUT_CRF", "23"))
+OUTPUT_PRESET = os.getenv("OUTPUT_PRESET", "medium")
+OUTPUT_PIXEL_FORMAT = os.getenv("OUTPUT_PIXEL_FORMAT", "yuv420p")
+OUTPUT_VIDEO_ENABLED = os.getenv("OUTPUT_VIDEO_ENABLED", "false").lower() == "true"
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
 
 os.makedirs(WATCH_FOLDER, exist_ok=True)
@@ -91,6 +96,14 @@ logger.info("Detector backend: %s", DETECTOR_BACKEND)
 logger.info("GPU preprocess: %s", GPU_PREPROCESS)
 logger.info("Dlib scale factor: %.2f", DLIB_SCALE_FACTOR)
 logger.info("Dlib detection workers: %d", DLIB_NUM_WORKERS)
+logger.info(
+    "Output encode settings: enabled=%s codec=%s crf=%d preset=%s pix_fmt=%s",
+    OUTPUT_VIDEO_ENABLED,
+    OUTPUT_CODEC,
+    OUTPUT_CRF,
+    OUTPUT_PRESET,
+    OUTPUT_PIXEL_FORMAT,
+)
 
 LOADED_MODELS = load_models(models_dir=MODELS_FOLDER, device=DEVICE)
 FACE_DETECTOR = build_detector(
@@ -162,6 +175,11 @@ def process_file(file_path: str) -> None:
         inference_batch_size=INFERENCE_BATCH_SIZE,
         gpu_preprocess=GPU_PREPROCESS,
         detection_num_workers=DLIB_NUM_WORKERS,
+        output_codec=OUTPUT_CODEC,
+        output_crf=OUTPUT_CRF,
+        output_preset=OUTPUT_PRESET,
+        output_pixel_format=OUTPUT_PIXEL_FORMAT,
+        output_video_enabled=OUTPUT_VIDEO_ENABLED,
     )
     logger.info("Processing completed: %s", result)
     _cleanup_accelerator_cache()
